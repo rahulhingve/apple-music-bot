@@ -46,3 +46,12 @@ def cleanup_request(session, request_id):
     if request:
         session.delete(request)
         session.commit()
+
+def cleanup_all_requests(session):
+    """Delete all requests from database"""
+    try:
+        session.query(DownloadRequest).delete()
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        raise Exception(f"Failed to cleanup database: {str(e)}")
