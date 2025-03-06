@@ -20,7 +20,8 @@ class MusicDownloader:
         try:
             os.chdir(self.tool_path)
             
-            # Start the download process
+            # Start the download process - just the URL first
+            logger.info(f"Starting download process for {music_url}")
             process = subprocess.Popen(
                 f"go run main.go --select {music_url}",
                 shell=True,
@@ -37,67 +38,62 @@ class MusicDownloader:
             t.daemon = True
             t.start()
 
-            # Wait for initial setup (10 seconds)
-            logger.info("Waiting for Go process to initialize...")
-            time.sleep(10)
-
-            # Wait for prompt and send input
-            found_prompt = False
-            output_buffer = []
-            max_attempts = 3
-            attempt = 0
-
-            while not found_prompt and attempt < max_attempts:
+            # First wait for the table to be displayed (15 seconds max)
+            logger.info("Waiting for track list to appear...")
+            table_found = False
+            start_time = time.time()
+            
+            while time.time() - start_time < 15:
                 try:
-                    # Read all available output
-                    while True:
-                        try:
-                            line = q.get_nowait()
-                            output_buffer.append(line.strip())
-                            logger.info(line.strip())
-                            if "select:" in line:
-                                found_prompt = True
-                                break
-                        except Empty:
-                            break
-                    
-                    if found_prompt:
-                        logger.info("Found selection prompt, sending track numbers")
-                        time.sleep(1)  # Wait before sending input
+                    while not q.empty():
+                        line = q.get_nowait()
+                        logger.info(line.strip())
+                        if "TRACK NAME" in line:
+                            table_found = True
+                except Empty:
+                    pass
+                time.sleep(0.5)
+                
+            if not table_found:
+                raise Exception("Track list not found")
+
+            # Now wait for select prompt and send tracks
+            logger.info("Waiting for select prompt...")
+            time.sleep(2)  # Give it time to show the prompt
+            
+            while True:
+                try:
+                    line = q.get(timeout=5)
+                    logger.info(line.strip())
+                    if "select:" in line:
+                        logger.info(f"Sending track selection: {track_numbers}")
+                        time.sleep(1)  # Wait a bit before sending
                         process.stdin.write(f"{track_numbers}\n")
                         process.stdin.flush()
-                    else:
-                        attempt += 1
-                        time.sleep(5)  # Wait 5 seconds before next attempt
-                
-                except Exception as e:
-                    logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
-                    attempt += 1
-                    time.sleep(5)
+                        break
+                except Empty:
+                    continue
 
-            if not found_prompt:
-                raise Exception("Failed to find selection prompt after multiple attempts")
-
-            # Continue reading output until process completes
+            # Wait for download to complete
             while process.poll() is None:
                 try:
                     line = q.get(timeout=1)
                     logger.info(line.strip())
-                    if "Completed:" in line:
+                    if "Completed:" in line and "Errors: 0" in line:
                         logger.info("Download completed successfully")
                         break
                 except Empty:
                     continue
 
-            # Check process result
+            # Verify success
             if process.returncode not in [None, 0]:
                 stderr = process.stderr.read()
                 raise Exception(f"Process failed: {stderr}")
 
-            # Verify download directory exists
+            # Check download directory
             download_dir = os.path.join(self.tool_path, "AM-DL downloads")
             if not os.path.exists(download_dir):
-                raise Exception("Download directory not found after process completion")
+                raise Exception("Download directory not found")
 
             return download_dir
 
