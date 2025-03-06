@@ -77,8 +77,14 @@ def main():
     except KeyboardInterrupt:
         logger.info("Received shutdown signal")
     finally:
-        # Run cleanup
-        asyncio.get_event_loop().run_until_complete(shutdown(app))
+        try:
+            # Create new event loop for cleanup
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(shutdown(app))
+            loop.close()
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
         logger.info("Bot stopped cleanly")
 
 if __name__ == '__main__':
