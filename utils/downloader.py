@@ -2,7 +2,7 @@ import subprocess
 import os
 import logging
 import time
-from queue import Queue
+from queue import Queue, Empty
 from threading import Thread
 
 logger = logging.getLogger(__name__)
@@ -37,22 +37,46 @@ class MusicDownloader:
             t.daemon = True
             t.start()
 
+            # Wait for initial setup (10 seconds)
+            logger.info("Waiting for Go process to initialize...")
+            time.sleep(10)
+
             # Wait for prompt and send input
             found_prompt = False
-            while not found_prompt:
+            output_buffer = []
+            max_attempts = 3
+            attempt = 0
+
+            while not found_prompt and attempt < max_attempts:
                 try:
-                    line = q.get(timeout=30)  # 30 second timeout
-                    logger.info(line.strip())
-                    if "select:" in line:
+                    # Read all available output
+                    while True:
+                        try:
+                            line = q.get_nowait()
+                            output_buffer.append(line.strip())
+                            logger.info(line.strip())
+                            if "select:" in line:
+                                found_prompt = True
+                                break
+                        except Empty:
+                            break
+                    
+                    if found_prompt:
                         logger.info("Found selection prompt, sending track numbers")
-                        time.sleep(0.5)  # Small delay before sending input
+                        time.sleep(1)  # Wait before sending input
                         process.stdin.write(f"{track_numbers}\n")
                         process.stdin.flush()
-                        found_prompt = True
+                    else:
+                        attempt += 1
+                        time.sleep(5)  # Wait 5 seconds before next attempt
+                
                 except Exception as e:
-                    logger.error(f"Error while waiting for prompt: {str(e)}")
-                    process.terminate()
-                    raise Exception("Timeout waiting for selection prompt")
+                    logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
+                    attempt += 1
+                    time.sleep(5)
+
+            if not found_prompt:
+                raise Exception("Failed to find selection prompt after multiple attempts")
 
             # Continue reading output until process completes
             while process.poll() is None:
@@ -61,10 +85,12 @@ class MusicDownloader:
                     logger.info(line.strip())
                     if "Completed:" in line:
                         logger.info("Download completed successfully")
-                except:
-                    pass  # No output within timeout
+                        break
+                except Empty:
+                    continue
 
-            if process.returncode != 0:
+            # Check process result
+            if process.returncode not in [None, 0]:
                 stderr = process.stderr.read()
                 raise Exception(f"Process failed: {stderr}")
 
