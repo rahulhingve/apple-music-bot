@@ -38,41 +38,28 @@ class MusicDownloader:
             t.daemon = True
             t.start()
 
-            # First wait for the table to be displayed (15 seconds max)
-            logger.info("Waiting for track list to appear...")
-            table_found = False
+            # Wait for track list and prompt
+            found_prompt = False
             start_time = time.time()
             
-            while time.time() - start_time < 15:
+            while time.time() - start_time < 30:  # 30 seconds timeout
                 try:
-                    while not q.empty():
-                        line = q.get_nowait()
-                        logger.info(line.strip())
-                        if "TRACK NAME" in line:
-                            table_found = True
-                except Empty:
-                    pass
-                time.sleep(0.5)
-                
-            if not table_found:
-                raise Exception("Track list not found")
-
-            # Now wait for select prompt and send tracks
-            logger.info("Waiting for select prompt...")
-            time.sleep(2)  # Give it time to show the prompt
-            
-            while True:
-                try:
-                    line = q.get(timeout=5)
+                    line = q.get(timeout=1)
                     logger.info(line.strip())
-                    if "select:" in line:
-                        logger.info(f"Sending track selection: {track_numbers}")
-                        time.sleep(1)  # Wait a bit before sending
+                    
+                    # When we see the prompt message, send track numbers
+                    if "Please select from the track options above" in line:
+                        logger.info(f"Found prompt, sending track numbers: {track_numbers}")
+                        time.sleep(0.5)  # Small delay before sending
                         process.stdin.write(f"{track_numbers}\n")
                         process.stdin.flush()
+                        found_prompt = True
                         break
                 except Empty:
                     continue
+
+            if not found_prompt:
+                raise Exception("Prompt not found within timeout")
 
             # Wait for download to complete
             while process.poll() is None:
