@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+from telegram import Update  # Add this import
 from telegram.ext import Application, CommandHandler, JobQueue
 from handlers.start_handler import start_command
 from handlers.help_handler import help_command
