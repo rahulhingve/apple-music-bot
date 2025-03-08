@@ -2,7 +2,9 @@ import logging
 import os
 import shutil
 import gc
+import asyncio
 from telegram import Bot
+from telegram.error import RetryAfter
 from utils.downloader import MusicDownloader
 from utils.zip_utils import create_zip
 from utils.uploader import upload_to_gofile
@@ -76,7 +78,13 @@ async def process_download_request(request, db_session):
         if downloader:
             downloader._cleanup()
         if bot:
-            await bot.close()
+            try:
+                await bot.close()
+            except RetryAfter as e:
+                # Ignore rate limit on close
+                logger.debug(f"Rate limit on bot close: {e}")
+            except Exception as e:
+                logger.error(f"Error closing bot: {e}")
         
         # Force garbage collection
         gc.collect()
