@@ -10,7 +10,10 @@ from telegram.ext import Application, CommandHandler, JobQueue
 from handlers.start_handler import start_command
 from handlers.help_handler import help_command
 from handlers.download_handler import alac_command
-from database.db_utils import init_db, get_pending_request, cleanup_request, cleanup_all_requests
+from database.db_utils import (
+    init_db, get_pending_request, cleanup_request, 
+    cleanup_all_requests, cleanup_non_indian_requests  # Add this import
+)
 from utils.task_processor import process_download_request
 from config import TELEGRAM_BOT_TOKEN
 
@@ -111,10 +114,6 @@ def main():
         # Initialize database with connection pooling
         logger.info("Initializing database...")
         db_session = init_db(pooling=True)
-        
-        # Cleanup non-Indian URLs from database
-        logger.info("Cleaning up non-Indian region requests...")
-        cleanup_non_indian_requests(db_session)
         
         # Initialize bot with more conservative settings
         logger.info("Starting bot...")
