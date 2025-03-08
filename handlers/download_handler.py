@@ -26,8 +26,20 @@ def validate_track_numbers(track_str):
     return False
 
 def validate_apple_music_url(url):
-    """Validate Apple Music URL format"""
-    return url.startswith(('https://music.apple.com/', 'http://music.apple.com/'))
+    """Validate Apple Music URL format with region and album checks"""
+    # Basic URL check
+    if not url.startswith(('https://music.apple.com/', 'http://music.apple.com/')):
+        return False, "invalid_url"
+    
+    # Check for Indian region
+    if '/in/' not in url:
+        return False, "non_indian"
+    
+    # Check for album type
+    if '/album/' not in url:
+        return False, "not_album"
+        
+    return True, None
 
 async def alac_command(update: Update, context: ContextTypes.DEFAULT_TYPE, db_session):
     try:
@@ -37,21 +49,39 @@ async def alac_command(update: Update, context: ContextTypes.DEFAULT_TYPE, db_se
                 "❌ Invalid command format!\n\n"
                 "Examples:\n"
                 "• For specific tracks:\n"
-                "`/alac https://music.apple.com/album/xyz 1,2,3`\n\n"
+                "`/alac https://music.apple.com/in/album/xyz 1,2,3`\n\n"
                 "• For entire album:\n"
-                "`/alac https://music.apple.com/album/xyz all`"
+                "`/alac https://music.apple.com/in/album/xyz all`"
             )
             return
         
         url = context.args[0]
         tracks = context.args[1]
         
-        # Validate URL
-        if not validate_apple_music_url(url):
-            await update.message.reply_text(
-                "❌ Invalid URL! Please provide a valid Apple Music URL."
-            )
-            return
+        # Enhanced URL validation
+        is_valid, error_type = validate_apple_music_url(url)
+        if not is_valid:
+            if error_type == "non_indian":
+                await update.message.reply_text(
+                    "❌ Only Indian region links are supported!\n\n"
+                    "Please visit the Indian Apple Music store and search your album there:\n"
+                    "https://music.apple.com/in/new\n\n"
+                    "Make sure your link contains '/in/' like this:\n"
+                    "https://music.apple.com/in/album/..."
+                )
+                return
+            elif error_type == "not_album":
+                await update.message.reply_text(
+                    "❌ Only album links are supported!\n\n"
+                    "Make sure your link contains '/album/' in it like this:\n"
+                    "https://music.apple.com/in/album/..."
+                )
+                return
+            else:
+                await update.message.reply_text(
+                    "❌ Invalid URL! Please provide a valid Apple Music URL."
+                )
+                return
             
         # Validate track numbers
         if not validate_track_numbers(tracks):
