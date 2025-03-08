@@ -13,6 +13,8 @@ from config import TELEGRAM_BOT_TOKEN, TOOL_PATH
 
 logger = logging.getLogger(__name__)
 
+GROUP_CHAT_ID = "@apple_music_bot_rahul"
+
 async def process_download_request(request, db_session):
     """Process a single download request through all tasks sequentially"""
     bot = None
@@ -47,11 +49,26 @@ async def process_download_request(request, db_session):
         logger.info(f"Task 4: Updating database for request {request.id}")
         update_gofile_link(db_session, request.id, gofile_url)
 
-        # Task 5: Send link to user
-        logger.info(f"Task 5: Sending link to user {request.user_id}")
+        # Task 5: Send links to user and group
+        logger.info(f"Task 5: Sending links to user {request.user_id} and group")
+        
+        # Send to user
         await bot.send_message(
             chat_id=request.user_id,
             text=f"✅ Your download is ready!\n🔗 Download link: https://{gofile_url}"
+        )
+        
+        # Send to group
+        group_message = (
+            f"✅ *Download Completed*\n\n"
+            f"🆔 Request ID: `{request.id}`\n"
+            f"🎵 Music URL: `{request.music_url}`\n"
+            f"⬇️ Download: https://{gofile_url}"
+        )
+        await bot.send_message(
+            chat_id=GROUP_CHAT_ID,
+            text=group_message,
+            parse_mode='Markdown'
         )
 
         # Task 6: Cleanup

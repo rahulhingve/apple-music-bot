@@ -5,6 +5,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = """
 🎵 *Apple Music Download Bot Help* 🎵
 
+Join this group for download links:
+https://t.me/apple_music_bot_rahul
+
 *Available Commands:*
 • /start - Start the bot
 • /help - Show this help message
