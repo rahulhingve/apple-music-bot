@@ -65,3 +65,15 @@ def cleanup_all_requests(session):
     except Exception as e:
         session.rollback()
         raise Exception(f"Failed to cleanup database: {str(e)}")
+
+def cleanup_non_indian_requests(session):
+    """Remove all requests that don't have Indian region URLs"""
+    try:
+        requests = session.query(DownloadRequest).filter_by(status='pending').all()
+        for request in requests:
+            if '/in/album/' not in request.music_url:
+                session.delete(request)
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        raise Exception(f"Failed to cleanup non-Indian requests: {str(e)}")

@@ -112,6 +112,10 @@ def main():
         logger.info("Initializing database...")
         db_session = init_db(pooling=True)
         
+        # Cleanup non-Indian URLs from database
+        logger.info("Cleaning up non-Indian region requests...")
+        cleanup_non_indian_requests(db_session)
+        
         # Initialize bot with more conservative settings
         logger.info("Starting bot...")
         app = (Application.builder()
