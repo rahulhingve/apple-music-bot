@@ -2,8 +2,9 @@ import subprocess
 import os
 import logging
 import time
+import signal
 from queue import Queue, Empty
-from threading import Thread
+from threading import Thread, Event
 import psutil
 
 logger = logging.getLogger(__name__)
@@ -12,11 +13,17 @@ class MusicDownloader:
     def __init__(self, tool_path):
         self.tool_path = tool_path
         self._process = None
+        self._stop_event = Event()
+        self._thread = None
 
     def _enqueue_output(self, out, queue):
-        for line in iter(out.readline, b''):
-            queue.put(line)
-        out.close()
+        try:
+            for line in iter(out.readline, b''):
+                if self._stop_event.is_set():
+                    break
+                queue.put(line)
+        finally:
+            out.close()
 
     def download(self, music_url, track_numbers):
         try:
@@ -41,11 +48,14 @@ class MusicDownloader:
             process = psutil.Process(self._process.pid)
             process.nice(10)  # Lower priority
             
-            # Set up queue and thread for non-blocking reads
+            # Reset stop event
+            self._stop_event.clear()
+            
+            # Set up queue and thread with proper cleanup
             q = Queue()
-            t = Thread(target=self._enqueue_output, args=(self._process.stdout, q))
-            t.daemon = True
-            t.start()
+            self._thread = Thread(target=self._enqueue_output, args=(self._process.stdout, q))
+            self._thread.daemon = True
+            self._thread.start()
 
             # Wait for track list and prompt
             found_prompt = False
@@ -102,16 +112,42 @@ class MusicDownloader:
     def _cleanup_zombie_processes(self):
         """Clean up any zombie processes"""
         try:
-            cmd = "pkill -f 'go run main.go'"
-            subprocess.run(cmd, shell=True, stderr=subprocess.DEVNULL)
+            # Kill any remaining go processes
+            subprocess.run(
+                "pkill -9 -f 'go run main.go'",
+                shell=True,
+                stderr=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL
+            )
         except:
             pass
 
     def _cleanup(self):
-        """Clean up resources"""
-        if self._process:
-            try:
-                os.killpg(os.getpgid(self._process.pid), signal.SIGTERM)
-            except:
-                pass
-            self._process = None
+        """Enhanced cleanup to prevent resource leaks"""
+        try:
+            # Signal thread to stop
+            self._stop_event.set()
+            
+            # Wait for thread to finish
+            if self._thread and self._thread.is_alive():
+                self._thread.join(timeout=2)
+
+            # Clean up process
+            if self._process:
+                try:
+                    # Kill entire process group
+                    os.killpg(os.getpgid(self._process.pid), signal.SIGTERM)
+                    self._process.wait(timeout=5)
+                except:
+                    try:
+                        os.killpg(os.getpgid(self._process.pid), signal.SIGKILL)
+                    except:
+                        pass
+                finally:
+                    self._process = None
+
+            # Force cleanup any remaining go processes
+            self._cleanup_zombie_processes()
+            
+        except Exception as e:
+            logger.error(f"Cleanup error: {e}")

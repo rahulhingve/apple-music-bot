@@ -4,6 +4,7 @@ import asyncio
 import logging
 import tempfile
 import psutil
+import gc
 from telegram import Update
 from telegram.ext import Application, CommandHandler, JobQueue
 from handlers.start_handler import start_command
@@ -67,15 +68,21 @@ async def process_queue(context):
     try:
         db_session = context.application.db_session
         request = get_pending_request(db_session)
-        logger.info("Checking queue for pending requests...")
         if request:
             logger.info(f"Processing request {request.id}")
             await process_download_request(request, db_session)
             cleanup_request(db_session, request.id)
             logger.info(f"Completed request {request.id}")
-        db_session.remove()  # Release session after use
+        
+        # Force cleanup after each request
+        gc.collect()
+        
     except Exception as e:
         logger.error(f"Error in queue processing: {str(e)}", exc_info=True)
+    finally:
+        # Always cleanup DB session
+        if 'db_session' in locals():
+            db_session.remove()
 
 async def shutdown(application):
     """Cleanup function to run on shutdown"""
@@ -144,6 +151,10 @@ def main():
 
         try:
             logger.info("Bot is running... Press Ctrl+C to stop")
+            
+            # Set process priority
+            os.nice(10)
+            
             app.run_polling(
                 drop_pending_updates=True,
                 allowed_updates=Update.ALL_TYPES,
@@ -165,6 +176,8 @@ def main():
         logger.error(f"Error running bot: {e}", exc_info=True)
     finally:
         remove_lock_file()
+        # Force final cleanup
+        gc.collect()
         logger.info("Cleaned up lock file")
 
 if __name__ == '__main__':

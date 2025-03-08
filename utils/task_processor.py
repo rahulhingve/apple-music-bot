@@ -1,6 +1,7 @@
 import logging
 import os
 import shutil
+import gc
 from telegram import Bot
 from utils.downloader import MusicDownloader
 from utils.zip_utils import create_zip
@@ -12,12 +13,15 @@ logger = logging.getLogger(__name__)
 
 async def process_download_request(request, db_session):
     """Process a single download request through all tasks sequentially"""
-    bot = Bot(TELEGRAM_BOT_TOKEN)
+    bot = None
+    downloader = None
     
     try:
+        bot = Bot(TELEGRAM_BOT_TOKEN)
+        downloader = MusicDownloader(TOOL_PATH)
+        
         # Task 1: Download music
         logger.info(f"Task 1: Downloading music for request {request.id}")
-        downloader = MusicDownloader(TOOL_PATH)
         download_dir = downloader.download(request.music_url, request.track_numbers)
         if not download_dir:
             raise Exception("Download failed")
@@ -58,11 +62,21 @@ async def process_download_request(request, db_session):
 
     except Exception as e:
         logger.error(f"Error processing request {request.id}: {str(e)}", exc_info=True)
-        try:
-            await bot.send_message(
-                chat_id=request.user_id,
-                text=f"❌ Sorry, there was an error processing your request:\n{str(e)}"
-            )
-        except:
-            logger.error("Failed to send error message to user", exc_info=True)
+        if bot:
+            try:
+                await bot.send_message(
+                    chat_id=request.user_id,
+                    text=f"❌ Sorry, there was an error processing your request:\n{str(e)}"
+                )
+            except:
+                logger.error("Failed to send error message to user", exc_info=True)
         raise
+    finally:
+        # Cleanup resources
+        if downloader:
+            downloader._cleanup()
+        if bot:
+            await bot.close()
+        
+        # Force garbage collection
+        gc.collect()
