@@ -1,0 +1,23 @@
+# /etc/systemd/system/music-bot.service
+[Unit]
+Description=Apple Music Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/apple-music-bot
+Environment=PATH=/root/venv/bin:$PATH
+ExecStart=/root/venv/bin/python3 main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+
+
+
+and for managing it 
+sudo systemctl enable music-bot
+sudo systemctl start music-bot
+sudo systemctl status music-bot

@@ -4,12 +4,14 @@ import logging
 import time
 from queue import Queue, Empty
 from threading import Thread
+import psutil
 
 logger = logging.getLogger(__name__)
 
 class MusicDownloader:
     def __init__(self, tool_path):
         self.tool_path = tool_path
+        self._process = None
 
     def _enqueue_output(self, out, queue):
         for line in iter(out.readline, b''):
@@ -20,21 +22,28 @@ class MusicDownloader:
         try:
             os.chdir(self.tool_path)
             
-            # Start the download process - just the URL first
-            logger.info(f"Starting download process for {music_url}")
-            process = subprocess.Popen(
+            # Kill any zombie processes
+            self._cleanup_zombie_processes()
+            
+            # Start process with resource limits
+            self._process = subprocess.Popen(
                 f"go run main.go --select {music_url}",
                 shell=True,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                bufsize=1
+                bufsize=1,
+                preexec_fn=os.setsid  # Create new process group
             )
+            
+            # Set CPU and memory limits
+            process = psutil.Process(self._process.pid)
+            process.nice(10)  # Lower priority
             
             # Set up queue and thread for non-blocking reads
             q = Queue()
-            t = Thread(target=self._enqueue_output, args=(process.stdout, q))
+            t = Thread(target=self._enqueue_output, args=(self._process.stdout, q))
             t.daemon = True
             t.start()
 
@@ -51,8 +60,8 @@ class MusicDownloader:
                     if "Please select from the track options above" in line:
                         logger.info(f"Found prompt, sending track numbers: {track_numbers}")
                         time.sleep(0.5)  # Small delay before sending
-                        process.stdin.write(f"{track_numbers}\n")
-                        process.stdin.flush()
+                        self._process.stdin.write(f"{track_numbers}\n")
+                        self._process.stdin.flush()
                         found_prompt = True
                         break
                 except Empty:
@@ -62,7 +71,7 @@ class MusicDownloader:
                 raise Exception("Prompt not found within timeout")
 
             # Wait for download to complete
-            while process.poll() is None:
+            while self._process.poll() is None:
                 try:
                     line = q.get(timeout=1)
                     logger.info(line.strip())
@@ -73,8 +82,8 @@ class MusicDownloader:
                     continue
 
             # Verify success
-            if process.returncode not in [None, 0]:
-                stderr = process.stderr.read()
+            if self._process.returncode not in [None, 0]:
+                stderr = self._process.stderr.read()
                 raise Exception(f"Process failed: {stderr}")
 
             # Check download directory
@@ -88,9 +97,21 @@ class MusicDownloader:
             logger.error(f"Download error: {str(e)}")
             raise Exception(f"Download failed: {str(e)}")
         finally:
-            if 'process' in locals():
-                try:
-                    process.terminate()
-                    process.wait(timeout=5)
-                except:
-                    pass
+            self._cleanup()
+
+    def _cleanup_zombie_processes(self):
+        """Clean up any zombie processes"""
+        try:
+            cmd = "pkill -f 'go run main.go'"
+            subprocess.run(cmd, shell=True, stderr=subprocess.DEVNULL)
+        except:
+            pass
+
+    def _cleanup(self):
+        """Clean up resources"""
+        if self._process:
+            try:
+                os.killpg(os.getpgid(self._process.pid), signal.SIGTERM)
+            except:
+                pass
+            self._process = None

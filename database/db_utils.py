@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy.pool import QueuePool
 
 Base = declarative_base()
 
@@ -14,10 +15,19 @@ class DownloadRequest(Base):
     gofile_link = Column(String, nullable=True)
     status = Column(String, default='pending')
 
-def init_db():
-    engine = create_engine('sqlite:///music_bot.db')
+def init_db(pooling=True):
+    """Initialize database with connection pooling"""
+    engine = create_engine(
+        'sqlite:///music_bot.db',
+        poolclass=QueuePool if pooling else None,
+        pool_size=5,
+        max_overflow=10,
+        pool_timeout=30,
+        pool_recycle=3600
+    )
     Base.metadata.create_all(engine)
-    return sessionmaker(bind=engine)()
+    session_factory = sessionmaker(bind=engine)
+    return scoped_session(session_factory)
 
 def add_request(session, user_id, music_url, track_numbers):
     request = DownloadRequest(

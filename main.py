@@ -1,4 +1,5 @@
 import os
+import signal
 import asyncio
 import logging
 from telegram import Update
@@ -17,7 +18,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Global flag for shutdown
+is_shutting_down = False
+
+def signal_handler(signum, frame):
+    global is_shutting_down
+    logger.info(f"Received signal {signum}")
+    is_shutting_down = True
+
 async def process_queue(context):
+    global is_shutting_down
+    if is_shutting_down:
+        return
+        
     try:
         db_session = context.application.db_session
         request = get_pending_request(db_session)
@@ -27,6 +40,7 @@ async def process_queue(context):
             await process_download_request(request, db_session)
             cleanup_request(db_session, request.id)
             logger.info(f"Completed request {request.id}")
+        db_session.remove()  # Release session after use
     except Exception as e:
         logger.error(f"Error in queue processing: {str(e)}", exc_info=True)
 
@@ -41,13 +55,23 @@ async def shutdown(application):
         logger.error(f"Error during cleanup: {e}")
 
 def main():
-    # Initialize database
+    # Set up signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    # Initialize database with connection pooling
     logger.info("Initializing database...")
-    db_session = init_db()
+    db_session = init_db(pooling=True)
     
-    # Initialize bot with token from config
+    # Initialize bot with more conservative settings
     logger.info("Starting bot...")
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    app = (Application.builder()
+           .token(TELEGRAM_BOT_TOKEN)
+           .read_timeout(30)
+           .write_timeout(30)
+           .pool_timeout(30)
+           .connect_timeout(30)
+           .build())
     
     # Store db_session in application
     app.db_session = db_session
@@ -63,7 +87,12 @@ def main():
     # Add job queue with error handling
     if app.job_queue:
         logger.info("Starting job queue...")
-        job = app.job_queue.run_repeating(process_queue, interval=30, first=10)
+        job = app.job_queue.run_repeating(
+            process_queue, 
+            interval=60,  # Increased interval to reduce CPU usage
+            first=10,
+            name='queue_processor'
+        )
         logger.info(f"Job queue started with job {job.name}")
     else:
         logger.error("Failed to initialize job queue!")
@@ -73,7 +102,11 @@ def main():
 
     try:
         logger.info("Bot is running... Press Ctrl+C to stop")
-        app.run_polling(allowed_updates=Update.ALL_TYPES)
+        app.run_polling(
+            drop_pending_updates=True,
+            allowed_updates=Update.ALL_TYPES,
+            stop_signals=(signal.SIGINT, signal.SIGTERM)
+        )
     except KeyboardInterrupt:
         logger.info("Received shutdown signal")
     finally:
@@ -90,5 +123,9 @@ def main():
 if __name__ == '__main__':
     try:
         main()
+    except KeyboardInterrupt:
+        logger.info("Received keyboard interrupt")
     except Exception as e:
         logger.error(f"Error running bot: {e}", exc_info=True)
+    finally:
+        logger.info("Shutting down...")
